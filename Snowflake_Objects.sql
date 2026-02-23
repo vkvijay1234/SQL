@@ -254,3 +254,186 @@ alter task parent_task_l1 suspend;
 --we can schedule inly 11520 min (8 days)
 --Task does not create for none existent WH
 --Need to run 1st parent then child defalut run
+
+--Data Masking
+use role sysadmin;
+-- step-1
+-- create databse and schema
+
+-- step-2 Create a customer table and load the data using webui.
+create or replace table data_mask_customer (
+ customer_id varchar(),
+ customer_first_name varchar(),
+ customer_last_name varchar(),
+ gender varchar(6),
+ govt_id varchar(),
+ date_of_birth date,
+ annual_income number(38,2),
+ credit_card_number varchar(20),
+ card_provider varchar(20),
+ mobile_number varchar,
+ address varchar(),
+ created_on timestamp_ntz(9)
+);
+
+-- lets describe the table and also view the table under object explorer
+desc table data_mask_customer;
+
+-- now load the sample data ... and query the table.
+select * from data_mask_customer limit 10;
+
+--Load option failed due to timestamp issue
+
+create or replace stage data_mask;
+
+CREATE OR REPLACE FILE FORMAT my_csv_format
+TYPE = CSV
+SKIP_HEADER = 1
+FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+TIMESTAMP_FORMAT = 'MM/DD/YYYY HH24:MI';
+
+COPY INTO data_mask_customer
+FROM @data_mask
+FILE_FORMAT = my_csv_format;
+
+select * from data_mask_customer limit 10;
+
+use role sysadmin;
+select * from data_mask_customer limit 10;
+use role public; -- will not be accessible
+select * from data_mask_customer limit 10;
+use role useradmin; -- will not be accessible
+select * from data_mask_customer limit 10;
+
+use role accountadmin;
+
+create or replace masking policy pii_masking_policy as (pii_text string)
+    returns string ->
+    case
+        when current_role() in ('ACCOUNTADMIN')
+            then pii_text
+        when current_role() in ('USERADMIN') then 
+            regexp_replace(pii_text,substring(pii_text,1,7),'xxx-xx-')
+        else '***Masked***'
+end;
+
+alter table data_mask_customer modify column govt_id set masking policy pii_masking_policy;
+
+-- how to list all policies
+show masking policies;
+
+-- how to describe a masking policy
+desc masking policy pii_masking_policy;
+
+-- get_ddl function support masking policy?
+select get_ddl('POLICY','pii_masking_policy');
+
+-- where it is stored in information schema
+-- account usage schema.
+
+-- map this masking policy to a column in a table.
+alter table data_mask_customer modify column govt_id set masking policy pii_masking_policy;
+
+select * from data_mask_customer;
+
+--Card Number Hide
+create or replace masking policy card_number_pii as (card_number string)
+    returns string ->
+    case
+        when current_role() in ('ACCOUNTADMIN')
+            then card_number
+        when current_role() in ('USERADMIN') then regexp_replace(card_number,substring(card_number,1,15),'xxxx-xxxx-xxxx-')
+        else '***Card-No-Masked***'
+end;
+
+alter table data_mask_customer modify column credit_card_number set masking policy card_number_pii;
+
+--Date of Birth Hide
+create or replace masking policy dob_pii as (date_of_birth date)
+    returns date ->
+    case
+        when current_role() in ('SYSADMIN')
+            then date_of_birth
+        else '1999-01-01'::date
+end;
+alter table data_mask_customer modify column date_of_birth set masking policy dob_pii;
+
+use role accountadmin;
+use role public;
+
+select * from data_mask_customer;
+
+--Phone Number Hide
+--Not workinh
+--ALTER TABLE data_mask_customer
+--ALTER COLUMN mobile_number SET DATA TYPE VARCHAR;
+
+
+create or replace masking policy phone_pii as (ph_num  varchar)
+    returns varchar ->
+           case when current_role() in ('ACCOUNTADMIN')
+           then ph_num
+           else left(ph_num,2) || repeat('X',8) || right(ph_num,2) end;
+
+alter table data_mask_customer modify column mobile_number  set masking policy phone_pii; 
+
+select * from data_mask_customer;
+
+select mobile_number,regexp_replace(mobile_number,substr(mobile_number,1,10),'XXXXXX') from data_mask_customer;
+
+select mobile_number,left(mobile_number,2) || repeat('X',8) || right(mobile_number,2) as mask_num from data_mask_customer;
+
+SELECT mobile_number,
+    REPEAT('X', 6) ||
+     right(mobile_number, 4) 
+FROM data_mask_customer;
+
+select distinct cast(mobile_number as varchar(10)) FROM data_mask_customer;
+
+--Conditional masking
+create or replace table data_mask_customer_cond (
+ customer_id varchar(),
+ customer_first_name varchar(),
+ customer_last_name varchar(),
+ gender varchar(6),
+ govt_id varchar(),
+ date_of_birth date,
+ annual_income number(38,2),
+ credit_card_number varchar(20),
+ card_provider varchar(20),
+ mobile_number varchar,
+  region varchar,
+ address varchar(),
+ created_on timestamp_ntz(9)
+);
+
+
+COPY INTO data_mask_customer_cond
+FROM @data_mask/Data_Mask_Conditional.csv
+FILE_FORMAT = my_csv_format;
+
+select * from data_mask_customer_cond;
+
+create or replace masking policy cond_mask_daata_pii as  (id string, reg string) 
+returns string ->
+     case when reg <> 'Europe' then id 
+     else '** ID Masked **' end;
+
+alter table data_mask_customer_cond
+modify column GOVT_ID set masking policy cond_mask_daata_pii using (GOVT_ID,REGION);
+
+
+select * from data_mask_customer_cond;
+
+--Tag based masking --Here we can update which all tag associated with tables
+
+ㆍDate filtering using functions like DATE_SUB
+DATE_SUB() is used to subtract a specific time interval from a date to filter recent records.
+📌 Brief Explanation:
+It helps retrieve data for a dynamic period like last 7 days, last 30 days, etc., by subtracting days from the current date.
+
+SELECT *
+FROM Orders
+WHERE order_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY);
+
+select DATE_SUB(CURDATE(), INTERVAL 7 DAY);
