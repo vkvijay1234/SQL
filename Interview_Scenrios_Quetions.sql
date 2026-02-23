@@ -910,6 +910,7 @@ WHERE SALARY =
 (SELECT MAX(SALARY) FROM EMPLOYEE
 WHERE SALARY < (SELECT MAX(SALARY) FROM EMPLOYEE));
 
+---Write query to get 2 reacords for each ID (Actual and Duplicate)
 id Name
 ------ 
 1  Anand
@@ -971,7 +972,8 @@ emp_id	emp_name	dept
 3 	Charlie 	IT
 4 	David 		HR
 5 	Eve 		HR
-
+--Write a Query to ger pairs of each name
+---Output emp1,emp2,dept
 ;
 CREATE TABLE emp (
     emp_id INT PRIMARY KEY,
@@ -991,4 +993,5 @@ select * from emp;
 select e1.emp_name as emp1,e2.emp_name as emp2,e1.dept from emp e1 
  join emp e2 on e1.dept=e2.dept
 where e1.emp_name < e2.emp_name
+
  ;
